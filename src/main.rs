@@ -1,9 +1,16 @@
-use poise::serenity_prelude as serenity;
+mod commands;
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, Data, Error>;
-// User data, which is stored and accessible in all command invocations
-struct Data {}
+use poise::{serenity_prelude as serenity};
+use crate::commands::*;
+
+pub mod helper {
+    pub type Error = Box<dyn std::error::Error + Send + Sync>;
+    pub type Context<'a> = poise::Context<'a, Data, Error>;
+    // User data, which is stored and accessible in all command invocations
+    pub struct Data {}
+}
+
+use crate::helper::*;
 
 /// Displays your or another user's account creation date
 #[poise::command(slash_command)]
@@ -17,21 +24,24 @@ async fn age(
     Ok(())
 }
 
-// TODO : Find if I can bypass this *replicate drachan's behaviour)
-#[poise::command(prefix_command)]
-async fn register(ctx: Context<'_>) -> Result<(), Error> {
-    poise::builtins::register_application_commands_buttons(ctx).await?;
-    Ok(())
+#[poise::command(prefix_command, owners_only, hide_in_help)]
+pub async fn register(ctx: Context<'_>, #[flag] global: bool) -> Result<(), Error> {
+    poise::builtins::register_application_commands(ctx, global).await.map_err(Into::into)
 }
 
 #[tokio::main]
 async fn main() {
+    let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
+
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: vec![age(), register()],
+            listener: |_, event, framework, _| {
+                Box::pin(reaction_role::rr(/*Context::from(ctx), */event, framework))
+            },
             ..Default::default()
         })
-        .token(std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN")) // Memo for fish : `set -gx DISCORD_TOKEN`
+        .token(token) // Memo for fish : `set -gx DISCORD_TOKEN`
         .intents(serenity::GatewayIntents::non_privileged())
         .user_data_setup(move |_ctx, _ready, _framework| Box::pin(async move { Ok(Data {}) }));
 
