@@ -19,7 +19,7 @@ pub mod helper {
 }
 
 use crate::helper::*;
-
+use crate::reaction_role::create_rr;
 
 
 /// Displays your or another user's account creation date
@@ -61,7 +61,7 @@ async fn main() {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![age(), register()],
+            commands: vec![age(), register(), create_rr()],
             listener: |ctx, event, framework, _| {
                 Box::pin(reaction_role::rr(ctx, event, framework))
             },

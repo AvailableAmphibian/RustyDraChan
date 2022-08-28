@@ -1,5 +1,5 @@
 use poise::{FrameworkContext, Event, Event::ReactionAdd};
-use poise::serenity_prelude::{Context, Emoji, Reaction, ReactionType::{Custom, Unicode}, RoleId};
+use poise::serenity_prelude::{Channel, Context, ReactionType::{Custom, Unicode}, ReactionType, Role, RoleId};
 use super::super::helper::*;
 use sea_orm::{
     ActiveValue::Set, ColumnTrait, Condition, DatabaseConnection,
@@ -7,8 +7,8 @@ use sea_orm::{
 };
 
 use core::default::Default as BaseDefault;
-use poise::futures_util::SinkExt;
 use crate::entity::{rdc_reactionrole, prelude::RdcReactionrole};
+use crate::helper;
 
 
 // fetch one item
@@ -18,28 +18,21 @@ use crate::entity::{rdc_reactionrole, prelude::RdcReactionrole};
 // }
 
 // insert one item
-async fn insert_role_in_db(guild_id:u64, channel_id:u64, message_id:u64, role_id:u64, emoji: String) {
-    // let emoji_as_str:str;
-    //
-    // if let Custom { id } = emoji {
-    //
-    // }
+async fn insert_role_in_db(db: &DatabaseConnection, guild_id:u64, channel_id:u64, message_id:u64, role_id:u64, emoji: String) {
+    let reaction_role = rdc_reactionrole::ActiveModel {
+        guild_id: Set(guild_id as i64),
+        channel_id: Set(channel_id as i64),
+        message_id: Set(message_id as i64),
+        role_id: Set(role_id as i64),
+        emoji: Set(emoji.to_owned()),
+        ..BaseDefault::default()
+    };
 
-    // let reaction_role = rdc_reactionrole::ActiveModel {
-    //     guild_id: Set(guild_id as i64),
-    //     channel_id: Set(channel_id as i64),
-    //     message_id: Set(message_id as i64),
-    //     role_id: Set(role_id as i64),
-    //     emoji: Set("❤️".to_owned()),
-    //     ..BaseDefault::default()
-    // };
-    //
-    // let reaction_role: rdc_reactionrole::Model = reaction_role.insert(&db).await.expect("Duh you can't insert here");
-
+    let _reaction_role: rdc_reactionrole::Model = reaction_role.insert(db).await.expect("Duh you can't insert here");
 }
 
 
-/// Displays your or another user's account creation date
+/// Give or remove a role according to a reaction
 pub async fn rr(
     context: &Context,
     event: &Event<'_>,
@@ -49,6 +42,11 @@ pub async fn rr(
 
     if let ReactionAdd { add_reaction} = event {
         let user_id = add_reaction.user_id.unwrap().0;
+
+        if user_id == framework.bot_id.0 {
+            return Ok(());
+        }
+
         let gid = match add_reaction.guild_id {
             Some(gid) => gid.0,
             _ => 0
@@ -56,7 +54,7 @@ pub async fn rr(
         let message_id = add_reaction.message_id.0;
         let channel_id = add_reaction.channel_id.0;
         let emoji = match &add_reaction.emoji {
-            Custom { id, .. } => id.to_string(),
+            Custom { id, name, .. } => format!("<:{}:{}>", name.as_ref().unwrap(), id.to_string()),
             Unicode(emote) => emote.to_string(),
             _ => panic!("Did not expect to get something else than Custom or Unicode !")
         };
@@ -92,5 +90,35 @@ pub async fn rr(
             None => println!("No role to give !")
         }
     }
+    Ok(())
+}
+
+/// Create a reaction role
+#[poise::command(slash_command)]
+pub async fn create_rr(
+    ctx: helper::Context<'_>,
+    #[description = "Selected channel"] channel: Channel,
+    #[description = "Selected message"] message_id: String,
+    #[description = "Selected role"] role: Role,
+    #[description = "Selected reaction"] reaction: String
+) -> Result<(), Error> {
+    let msg = match unsafe_create_rr(ctx, channel, message_id, role, reaction).await {
+        Ok(()) => String::from("Successfully created a reaction role !"),
+        Err(error) => format!("An error occurred !\nError : {}", error)
+    };
+    ctx.say(msg).await?;
+    Ok(())
+}
+
+async fn unsafe_create_rr(ctx: helper::Context<'_>, channel:Channel, message_id:String, role: Role, reaction:String) -> Result<(), Error> {
+    let http = &ctx.discord().http;
+    let channel_id = channel.id().0;
+    let message_id = message_id.parse::<u64>()?;
+    let reaction_type = ReactionType::try_from(reaction.as_ref())?;
+
+    insert_role_in_db(&ctx.data().db, role.guild_id.0, channel_id, message_id, role.id.0, reaction).await;
+
+    http.create_reaction(channel_id, message_id, &reaction_type).await?;
+
     Ok(())
 }
